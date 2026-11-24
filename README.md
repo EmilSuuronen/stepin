@@ -1,12 +1,12 @@
 # stepin
 
-Walk around inside a photo, in your terminal.
+Walk around inside an image in your terminal. Any image produces a segmented 3D point cloud of it with a local AI stack. Interact with stuff with terminal commands, with all of the objects detected and recognized. Most of the time :) 
 
 ![demo](docs/demo.gif)
 
 ## Install
 
-You need Linux (or WSL), Python 3.11-3.13 and [uv](https://docs.astral.sh/uv/). An NVIDIA card with 8 GB or so helps a lot.
+Currently only works on Linux, Python 3.11-3.13 and [uv](https://docs.astral.sh/uv/). An NVIDIA card with 8 GB memory is recommended (only tested with RTX A3000 12GB).
 
 ```
 git clone https://github.com/EmilSuuronen/stepin
@@ -26,7 +26,7 @@ Built in: `bedroom` `bicycle` `cafe` `desk` `dog` `kitchen` `livingroom` `palace
 
 The AI models (about 5 GB) download the first time you run it. A new photo takes around a minute, after that it opens right away. Nothing gets uploaded anywhere.
 
-Make the terminal window big. Small font = better picture.
+Big/fullscreen terminal window makes everything look nice. Small font = better picture.
 
 ## Keys
 
@@ -63,8 +63,7 @@ help                  the rest
 ## Good to know
 
 - A photo only shows one side of things, so go too far and you'll see gaps.
-- Sizes are estimates.
-- Changes are gone when you quit.
+- Sizes are estimates, as is depth estimation
 - Garbled picture? Try `--mode half`.
 
 ## Built with
