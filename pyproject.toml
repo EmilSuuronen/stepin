@@ -3,6 +3,7 @@ name = "stepin"
 version = "0.1.0"
 description = "Step inside a photo, in your terminal, and run shell commands on what you find there."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11,<3.14"
 dependencies = [
   "numpy>=2",
