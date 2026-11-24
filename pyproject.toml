@@ -1,0 +1,50 @@
+[project]
+name = "stepin"
+version = "0.1.0"
+description = "Step inside a photo, in your terminal, and run shell commands on what you find there."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "numpy>=2",
+  "numba>=0.61",
+  "pillow>=10",
+  "scipy>=1.11",
+  "torch>=2.6",
+  "torchvision",
+  "transformers>=5",
+  "huggingface-hub",
+  "moge @ git+https://github.com/microsoft/MoGe.git@b942f00bdc",
+]
+
+[project.scripts]
+stepin = "stepin.cli:main"
+
+[dependency-groups]
+dev = ["pytest", "pyte"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stepin"]
+
+[tool.uv]
+# MoGe's demo app and training viewers; the model itself never imports them.
+override-dependencies = ["gradio ; sys_platform == 'never'", "trimesh ; sys_platform == 'never'"]
+
+# The newest CUDA wheels (cu132) segfault in torch.cuda.is_available() on WSL2 with driver 596.
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch", marker = "sys_platform != 'darwin'" }
+torchvision = { index = "pytorch", marker = "sys_platform != 'darwin'" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
