@@ -4,6 +4,7 @@ Every point carries a tag. The tag tables (show, offset, glow) decide how all po
 so removing, moving or highlighting an object never touches the points themselves.
 """
 
+import io
 import json
 import re
 from dataclasses import dataclass
@@ -14,7 +15,7 @@ from scipy import ndimage
 from scipy.spatial import ConvexHull, QhullError
 
 MAX_TAGS = 4096
-FORMAT = 1
+FORMAT = 2
 BACKGROUND = 0
 # Things other things stand on rather than belong to.
 FLAT = {"rug", "carpet", "floor mat", "curtain", "window", "door"}
@@ -35,6 +36,26 @@ class Obj:
     @property
     def path(self) -> str:
         return f"{self.parent.path}/{self.name}" if self.parent else self.name
+
+
+def pack_depth(z: np.ndarray) -> np.ndarray:
+    """Depth as 16-bit logarithms: 0.02% steps from 5 cm to 10 km, and a quarter of the file size. 0 is "nothing"."""
+    code = np.log(np.clip(z, 0.05, 1e4) / 0.05) / np.log(2e5) * 65534 + 1
+    return np.where(z > 0, np.round(code), 0).astype(np.uint16)
+
+
+def unpack_depth(code: np.ndarray) -> np.ndarray:
+    return np.where(code > 0, 0.05 * np.exp((code - 1.0) / 65534 * np.log(2e5)), 0).astype(np.float32)
+
+
+def pack_image(image: np.ndarray) -> np.ndarray:
+    buffer = io.BytesIO()
+    Image.fromarray(image).save(buffer, "JPEG", quality=93, subsampling=0)
+    return np.frombuffer(buffer.getvalue(), np.uint8)
+
+
+def unpack_image(data: np.ndarray) -> np.ndarray:
+    return np.asarray(Image.open(io.BytesIO(data.tobytes()), formats=["JPEG"]).convert("RGB")).copy()
 
 
 @dataclass
@@ -60,14 +81,15 @@ class Build:
             np.savez_compressed(
                 file,
                 meta=np.array(meta),
-                image=self.image,
+                image=pack_image(self.image),
                 # Points lie on known rays, so their depth is enough.
-                depth=self.points[..., 2],
+                depth=pack_depth(self.points[..., 2]),
                 valid=self.valid,
                 masks=np.packbits(self.masks),
-                plate_image=self.plate_image,
-                plate_depth=self.plate_points[..., 2],
-                plate_valid=self.plate_valid,
+                plate_image=pack_image(self.plate_image),
+                # Only ever seen behind objects, so the rest need not take space.
+                plate_depth=pack_depth(np.where(self.masks.any(0), self.plate_points[..., 2], 0)),
+                plate_valid=self.plate_valid & self.masks.any(0),
             )
         part.replace(path)
 
@@ -80,9 +102,9 @@ class Build:
             shape = tuple(meta["shape"])
             masks = np.unpackbits(data["masks"], count=int(np.prod(shape))).reshape(shape).astype(bool)
             ray = rays(shape[1:], meta["focal"])
-            points, plate = (ray * data[key][..., None] for key in ("depth", "plate_depth"))
-            return cls(data["image"], points, data["valid"], meta["focal"], meta["caption"], meta["labels"],
-                       masks, data["plate_image"], plate, data["plate_valid"])
+            points, plate = (ray * unpack_depth(data[key])[..., None] for key in ("depth", "plate_depth"))
+            return cls(unpack_image(data["image"]), points, data["valid"], meta["focal"], meta["caption"], meta["labels"],
+                       masks, unpack_image(data["plate_image"]), plate, data["plate_valid"])
 
 
 def slug(label: str) -> str:
@@ -151,10 +173,15 @@ class Scene:
         self.drift = np.zeros(0, np.float32)
         self.tag = np.zeros(0, np.int16)
 
+        depth = self.points[..., 2][self.valid]
+        self.scale = float(np.median(depth)) if depth.size else 1.0
+        self.sky = 3 * float(np.percentile(depth, 99)) if depth.size else 1.0
+        self.points, self.valid = self._with_sky(self.points, self.valid)
         self.points, edges = snap_edges(self.points, self.valid, self.focal)
         # Points beside a break get to float a little once you leave the photo's own viewpoint.
         distance = ndimage.distance_transform_edt(~edges)
         self._append_grid(self.valid, self.points, self.image, np.clip(1 - distance / 3, 0, 1), BACKGROUND, front=True)
+        # Only what is behind objects is stored, so a missing pixel here is not sky.
         plate_points, _ = snap_edges(build.plate_points, build.plate_valid, self.focal)
         plate_size = point_sizes(plate_points, self.focal)
         # shortcut: a hidden layer only just behind the object would flicker through it, so thin gaps stay empty.
@@ -168,10 +195,12 @@ class Scene:
             self._append(*(np.concatenate(c) for c in zip(*chunks)))
         self._nest()
 
-        depth = self.points[..., 2][self.valid]
-        self.scale = float(np.median(depth)) if depth.size else 1.0
-
     # building -----------------------------------------------------------------
+
+    def _with_sky(self, points, valid):
+        """Where there is no surface there is sky: a backdrop far behind everything."""
+        backdrop = rays(valid.shape, self.focal) * self.sky
+        return np.where(valid[..., None], points, backdrop).astype(np.float32), np.ones_like(valid)
 
     def new_tag(self) -> int:
         if self._next_tag >= MAX_TAGS:
@@ -287,6 +316,7 @@ class Scene:
         tag = None
         if fill is not None:
             rgb, points, valid = fill
+            points, valid = self._with_sky(points, valid)
             tag = self.new_tag()
             points, _ = snap_edges(points, valid, self.focal)
             self.image[mask], self.points[mask], self.valid[mask] = rgb[mask], points[mask], valid[mask]

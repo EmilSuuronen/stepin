@@ -149,3 +149,41 @@ def test_snap_never_overwrites(app, tmp_path):
     out = tmp_path / "a.png"
     run(app, f"snap {out}", f"snap {out}")
     assert out.exists() and "already exists" in text(app)
+
+
+def test_open_switches_photo_and_bad_names_do_not(app):
+    from stepin.paths import builtin
+
+    assert len(builtin()) >= 5
+    run(app, "open nowhere.jpg")
+    assert app.title == "room" and "no such photo" in text(app)
+    run(app, "cd box", f"open {builtin()[0]}")
+    assert app.title == builtin()[0] and app.shell.prompt == f"{app.title}> "
+    assert app.scene.objects
+    app.handle(Key("n", "n"))
+    assert app.title == builtin()[1]
+
+
+def test_open_of_a_new_file_builds_it_and_shows_progress(app, build, tmp_path, monkeypatch):
+    photo = tmp_path / "my photo.jpg"
+    photo.write_bytes(b"x")
+    monkeypatch.setattr("stepin.paths.CACHE", tmp_path)
+    answers = [("progress", "measuring depth"), ("done", None)]
+
+    def request(op, path, out):
+        build.save(out)
+        app.worker.busy = op
+
+    def poll(timeout=0):
+        if not answers or app.worker.busy is None:
+            return None
+        answer = answers.pop(0)
+        if answer[0] == "done":
+            app.worker.busy = None
+        return answer
+
+    app.worker.request, app.worker.poll = request, poll
+    app.shell.run(f"open '{photo}'")
+    # Pretend the file appeared only once the AI finished.
+    settle(app)
+    assert app.title == "my-photo"

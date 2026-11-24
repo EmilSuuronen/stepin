@@ -2,7 +2,7 @@ import numpy as np
 
 from stepin.build import pick_objects
 from stepin.render import Camera, Renderer
-from stepin.scene import Build, Scene, depth_edges, rays, slug
+from stepin.scene import Build, Scene, depth_edges, pack_depth, rays, slug, unpack_depth
 
 
 def test_save_and_load_keep_everything(build, tmp_path):
@@ -11,7 +11,15 @@ def test_save_and_load_keep_everything(build, tmp_path):
     again = Build.load(path)
     assert again.labels == build.labels and again.caption == build.caption
     np.testing.assert_array_equal(again.masks, build.masks)
-    np.testing.assert_allclose(again.points, build.points, atol=1e-5)
+    np.testing.assert_allclose(again.points, build.points, rtol=3e-4)
+    assert np.abs(again.image.astype(int) - build.image).mean() < 3
+
+
+def test_depth_packing_is_fine_grained_and_keeps_nothing_as_nothing():
+    z = np.array([0, 0.06, 1, 5, 300, 9000], np.float32)
+    again = unpack_depth(pack_depth(z))
+    assert again[0] == 0
+    np.testing.assert_allclose(again, z, rtol=2e-4)
 
 
 def test_objects_own_their_points_and_nest(scene):
@@ -68,3 +76,12 @@ def test_pick_objects_drops_duplicates_and_specks():
 def test_slug():
     assert slug("Kitchen & Dining table") == "kitchen-dining-table"
     assert slug("../..") == "thing"
+
+
+def test_sky_is_a_backdrop_not_a_hole(build):
+    build.valid = build.valid.copy()
+    build.valid[:10] = False
+    scene = Scene(build)
+    _, tags = Renderer().draw(scene, Camera(), 128, 96)
+    assert (tags >= 0).all()
+    assert scene.scale < 5 < scene.sky

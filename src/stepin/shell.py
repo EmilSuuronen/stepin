@@ -8,6 +8,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from .cells import MODES
+from .paths import builtin
 from .render import STYLES
 from .scene import Obj
 
@@ -26,6 +27,8 @@ measure a [b]        size, or distance between two
 undo                 take back the last change
 style photo|hologram|depth|objects
 mode quad|half|braille|ascii
+photos               photos that come with stepin
+open photo           step into another one, or any image file
 labels               show or hide name tags
 snap [file.png]      save this view
 reset  clear  help  exit"""
@@ -78,6 +81,8 @@ class Shell:
             options = STYLES
         elif head.split()[0] == "mode":
             options = MODES
+        elif head.split()[0] == "open":
+            options = builtin()
         else:
             base, _, _ = word.rpartition("/")
             prefix = base + "/" if base else ""
@@ -271,6 +276,14 @@ class Shell:
 
     def cmd_mode(self, args):
         self.app.mode = self._choice(args, MODES, "mode")
+
+    def cmd_photos(self, args):
+        self.app.columns([name + ("*" if name == self.app.title else "") for name in builtin()])
+
+    def cmd_open(self, args):
+        if len(args) != 1:
+            raise ShellError("usage: open photo")
+        self.app.open(args[0])
 
     def cmd_labels(self, args):
         self.app.labels = not self.app.labels

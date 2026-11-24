@@ -108,7 +108,7 @@ def _shade(zbuf, ibuf, col, tag, show, glow, palette, style, near, far, time, rg
                 r, g, b = palette[t, 0] * m, palette[t, 1] * m, palette[t, 2] * m
             if show[t] < 1.0:
                 k = min((1.0 - show[t]) * 1.5, 1.0)
-                r, g, b = r + (255 - r) * k * 0.45, g + (175 - g) * k * 0.45, b + (95 - b) * k * 0.45
+                r, g, b = r + (255 - r) * k * 0.3, g + (175 - g) * k * 0.3, b + (95 - b) * k * 0.3
             if glow[t] > 0.0:
                 k = glow[t]
                 # A bright rim where the tag ends, a soft tint inside.

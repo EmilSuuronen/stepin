@@ -7,15 +7,16 @@ from pathlib import Path
 import numpy as np
 
 from .cells import MODES, Screen
+from .paths import PHOTOS, builtin, scene_path, title_of
 from .render import STYLES, Camera, Renderer
-from .scene import Scene
+from .scene import Build, Scene
 from .shell import Shell, ShellError
 from .term import Key, Mouse, Terminal
 
 AMBER, WHITE, DIM, RED, GREEN, BAR = 0xFFAE61, 0xF6F1E8, 0x9A948A, 0xFF6B5E, 0x8FE0A0, 0x14110D
 FRAME = 1 / 30
 UNDO_LIMIT = 10
-FLY_HINT = "WASD move · R/F up/down · arrows or drag look · click pick · Enter shell · M mode · T style · Q quit"
+FLY_HINT = "WASD move · R/F up/down · arrows or drag look · click pick · Enter shell · N next photo · M mode · T style · Q quit"
 
 
 def overlap(scene, obj, mask) -> float:
@@ -25,8 +26,9 @@ def overlap(scene, obj, mask) -> float:
 
 class App:
     def __init__(self, scene: Scene, worker, title: str, mode: int = 0):
-        self.scene, self.worker, self.title = scene, worker, title
-        self.camera, self.renderer, self.shell = Camera(), Renderer(), Shell(self)
+        self.worker = worker
+        self.renderer, self.shell = Renderer(), Shell(self)
+        self._enter(scene, title)
         self.mode, self.style, self.labels = mode, 0, False
         self.log: list[tuple[str, int]] = []
         self.running, self.typing = True, False
@@ -34,22 +36,25 @@ class App:
         self.history: list[str] = []
         self._recall = 0
         self._scroll = 0
+        self._pending = None  # what to do with the AI's answer
+        self._after_warm = None  # one request may wait for the models to load
+        self._drag = None
+        self._log_until = 0.0
+        self._start = time.monotonic()
+        self._dirty = True
+        self._screen: Screen | None = None
+
+    def _enter(self, scene: Scene, title: str):
+        self.scene, self.title, self.camera = scene, title, Camera()
+        self.shell.cwd = None
         self._velocity, self._spin = np.zeros(3), np.zeros(2)  # right/down/forward and yaw/pitch, per second
-        self._flight = None
+        self._flight = self._tags = None
         self._tweens: list[tuple] = []
         self._flashes: dict[int, float] = {}
         self._label_until = 0.0
         self._labelled: list = []
         self._anchors: dict = {}
-        self._pending = None  # what to do with the AI's answer
-        self._after_warm = None  # one request may wait for the models to load
-        self._drag = None
-        self._tags = None
-        self._log_until = 0.0
-        self._start = time.monotonic()
-        self._intro = self._start
-        self._dirty = True
-        self._screen: Screen | None = None
+        self._intro = time.monotonic()
 
     # verbs the shell uses -------------------------------------------------------
 
@@ -238,6 +243,35 @@ class App:
         self._ask("find", (self.scene.image, text), (arrived, lambda: None))
         self.say(f"looking for {text}...", DIM)
 
+    def open(self, name):
+        """A built-in photo by name, or any image file. New files are looked at first, which takes a while."""
+        self._need_idle()
+        photo = Path(name).expanduser()
+        if name in builtin():
+            path, title = PHOTOS / f"{name}.npz", name
+        elif not photo.is_file():
+            raise ShellError(f"{name}: no such photo (see photos)")
+        else:
+            path, title = scene_path(photo), title_of(photo)
+        try:
+            return self._enter(Scene(Build.load(path)), title)
+        except Exception:
+            if name in builtin():
+                raise ShellError(f"{name}: the scene file is damaged") from None
+        # Not seen before, or saved by an older version.
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        def arrived(_):
+            self._enter(Scene(Build.load(path)), title)
+
+        self._ask("build", (str(photo.resolve()), path), (arrived, lambda: None))
+        self.say(f"looking at {photo.name}...", DIM)
+
+    def next_photo(self):
+        names = builtin()
+        if names:
+            self.open(names[(names.index(self.title) + 1) % len(names)] if self.title in names else names[0])
+
     def snap(self, name):
         path = Path(name or f"{self.title}-{time.strftime('%H%M%S')}.png").expanduser()
         if path.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
@@ -309,8 +343,8 @@ class App:
 
     def _push(self, axis, sign):
         self._flight = None
-        top = 0.55 * self.scene.scale
-        self._velocity[axis] = min(max(self._velocity[axis] + sign * 0.3 * self.scene.scale, -top), top)
+        top = 0.35 * self.scene.scale
+        self._velocity[axis] = min(max(self._velocity[axis] + sign * 0.2 * self.scene.scale, -top), top)
 
     def _turn(self, axis, sign):
         self._flight = None
@@ -332,6 +366,11 @@ class App:
             self.style = (self.style + 1) % len(STYLES)
         elif name == "l":
             self.labels = not self.labels
+        elif name == "n":
+            try:
+                self.next_photo()
+            except ShellError as error:
+                self.error(str(error))
         elif name in ("home", "z"):
             self.fly_to(None)
         elif name == "q":
@@ -444,6 +483,8 @@ class App:
             return
         self._dirty = True
         kind, value = message
+        if kind == "progress":
+            return self.say(f"{value}...", DIM)
         pending, self._pending = self._pending, None
         if pending:
             arrived, failed = pending

@@ -23,6 +23,8 @@ ALIASES = {
     "kitchen & dining room table": "table", "coffee table": "table", "couch": "sofa", "sofa bed": "sofa", "houseplant": "plant",
     "potted plant": "plant", "pillow": "cushion", "picture frame": "picture", "computer monitor": "monitor", "television": "tv",
     "man": "person", "woman": "person", "boy": "person", "girl": "person", "flowerpot": "pot", "studio couch": "sofa",
+    "computer keyboard": "keyboard", "computer mouse": "mouse", "mobile phone": "phone", "coffee cup": "cup", "suv": "car",
+    "microwave oven": "microwave", "cabinetry": "cabinet", "gas stove": "stove",
 }
 # Parts of things, not things.
 SKIP = {"human face", "human hair", "human hand", "human arm", "human leg", "human head", "human eye", "human nose", "human mouth",
